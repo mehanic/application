@@ -61,11 +61,11 @@ func (r *Router) PutToAllRoutes(f func(*Context)) {
 }
 
 func ConstructRequest(c *Context) {
-	c.Header("Access-Control-Allow-Methods", "GET, POST")
+	c.Header("Access-Controll-Allow-Methods", "GET, POST")
 	c.Header("Access-Control-Max-Age", "86400")
-	c.Header("Access-Control-Allow-Credentials", "true")
+	c.Header("Accees-Control-Allow-Credentials", "true")
 	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	c.Header("Access-Control-Allow-Headers", "Context-Type, Authorization")
 }
 
 func DestructRequest(c *Context) {

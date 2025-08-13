@@ -20,7 +20,7 @@ var files = new(apiFiles)
 type apiFiles struct{}
 
 func handleFiles(r *server.Router) {
-	r.GET("/{name}", files.show)
+	r.GET("/{home}", files.show)
 	r.POST("", files.upload)
 	r.GET("", files.list)
 }
@@ -81,79 +81,148 @@ type HTTPfile interface {
 	io.Closer
 }
 
-func resizeAndStore(dir string, file HTTPfile, name string, params ImageResizeParams) error {
-	if name == "original" {
-		file.Seek(0, 0)
-		buf := &bytes.Buffer{}
-		_, err := buf.ReadFrom(file)
-		if err != nil {
-			return err
-		}
+// func resizeAndStore(dir string, file HTTPfile, name string, params ImageResizeParams) error {
+// 	if name == "original" {
+// 		file.Seek(0, 0)
+// 		buf := &bytes.Buffer{}
+// 		_, err := buf.ReadFrom(file)
+// 		if err != nil {
+// 			return err
+// 		}
 
-		err = os.WriteFile(fmt.Sprintf("assets/img/%s/%s.jpg", dir, name), buf.Bytes(), 0o777)
-		if err != nil {
-			return err
-		} else {
-			file.Seek(0, 0)
-			img, _, err := image.Decode(file)
-			if err != nil {
-				return err
-			}
-			dImg := imaging.Fit(img, params.Width, params.Height, imaging.Lanczos)
-			var b []byte
-			buf := bytes.NewBuffer(b)
-			jpeg.Encode(buf, dImg, &jpeg.Options{Quality: params.Quality})
-			err = os.WriteFile(fmt.Sprintf("assets/img/%s/%s.jpg", dir, name), buf.Bytes(), 0o777)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+// 		err = os.WriteFile(fmt.Sprintf("assets/img/%s/%s.jpg", dir, name), buf.Bytes(), 0o777)
+// 		if err != nil {
+// 			return err
+// 		} else {
+// 			file.Seek(0, 0)
+// 			img, _, err := image.Decode(file)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			dImg := imaging.Fit(img, params.Width, params.Height, imaging.Lanczos)
+// 			var b []byte
+// 			buf := bytes.NewBuffer(b)
+// 			jpeg.Encode(buf, dImg, &jpeg.Options{Quality: params.Quality})
+// 			err = os.WriteFile(fmt.Sprintf("assets/img/%s/%s.jpg", dir, name), buf.Bytes(), 0o777)
+// 			if err != nil {
+// 				return err
+// 			}
+// 		}
+// 		return nil
+// 	}
+// 	return nil
+// }
+
+func resizeAndStore(dir string, img image.Image, name string, params ImageResizeParams) error {
+	outPath := fmt.Sprintf("assets/img/%s/%s.jpg", dir, name)
+
+	// Оригинал — без изменения размера
+	if name == "original" {
+		return saveJPEG(outPath, img, params.Quality)
 	}
-	return nil
+
+	// Ресайз
+	dImg := imaging.Fit(img, params.Width, params.Height, imaging.Lanczos)
+	return saveJPEG(outPath, dImg, params.Quality)
+}
+
+func saveJPEG(path string, img image.Image, quality int) error {
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+		return err
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
 func (af *apiFiles) upload(c *server.Context) {
-	HTTPFile, _, err := c.Request.FormFile("file")
+	f, _, err := c.Request.FormFile("file")
 	if err != nil {
 		c.RenderError(http.StatusBadRequest, err)
 		return
-
 	}
+	defer f.Close()
 
-	//	dir := uuid.NewV1().String()
-	id, err := uuid.NewV1()
+	// Читаем файл в память
+	data, err := io.ReadAll(f)
 	if err != nil {
 		c.RenderError(http.StatusInternalServerError, err)
 		return
 	}
-	dir := id.String()
 
-	err = os.Mkdir(fmt.Sprintf("assets/img/%s", dir), 0o777)
+	// Декодируем в image.Image
+	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		c.RenderError(http.StatusBadRequest, err)
 		return
-
 	}
 
-	for k, p := range ImageParams {
-		err = resizeAndStore(dir, HTTPFile, k, p)
-		if err != nil {
+	// Создаём директорию
+	id, _ := uuid.NewV1()
+	dir := id.String()
+	if err := os.Mkdir(fmt.Sprintf("assets/img/%s", dir), 0o755); err != nil {
+		c.RenderError(http.StatusBadRequest, err)
+		return
+	}
+
+	// Сохраняем все размеры
+	for name, p := range ImageParams {
+		if err := resizeAndStore(dir, img, name, p); err != nil {
 			c.RenderError(http.StatusBadRequest, err)
 			return
 		}
-
 	}
 
+	// Создаём запись в БД
 	file, err := models.Files.Create(dir)
 	if err != nil {
 		c.RenderError(http.StatusBadRequest, err)
 		return
-
 	}
 
 	c.RenderJSON(http.StatusCreated, af.response(file))
 }
+
+// func (af *apiFiles) upload(c *server.Context) {
+// 	HTTPFile, _, err := c.Request.FormFile("file")
+// 	if err != nil {
+// 		c.RenderError(http.StatusBadRequest, err)
+// 		return
+
+// 	}
+
+// 	//	dir := uuid.NewV1().String()
+// 	id, err := uuid.NewV1()
+// 	if err != nil {
+// 		c.RenderError(http.StatusInternalServerError, err)
+// 		return
+// 	}
+// 	dir := id.String()
+
+// 	err = os.Mkdir(fmt.Sprintf("assets/img/%s", dir), 0o777)
+// 	if err != nil {
+// 		c.RenderError(http.StatusBadRequest, err)
+// 		return
+
+// 	}
+
+// 	for k, p := range ImageParams {
+// 		err = resizeAndStore(dir, HTTPFile, k, p)
+// 		if err != nil {
+// 			c.RenderError(http.StatusBadRequest, err)
+// 			return
+// 		}
+
+// 	}
+
+// 	file, err := models.Files.Create(dir)
+// 	if err != nil {
+// 		c.RenderError(http.StatusBadRequest, err)
+// 		return
+
+// 	}
+
+// 	c.RenderJSON(http.StatusCreated, af.response(file))
+// }
 
 func (af *apiFiles) show(c *server.Context) {
 	file, err := models.Files.ByName(c.Param("name"))
